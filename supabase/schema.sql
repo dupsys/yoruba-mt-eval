@@ -115,3 +115,39 @@ create policy consents_read on public.consents for select to authenticated
 drop policy if exists consents_insert on public.consents;
 create policy consents_insert on public.consents for insert to authenticated
   with check (rater_code = public.current_rater_code());
+
+-- ---------------------------------------------------------------- admin management of evaluators (migration 002)
+alter table public.raters drop constraint if exists raters_email_format;
+alter table public.raters add constraint raters_email_format
+  check (email = lower(email) and email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$');
+alter table public.raters drop constraint if exists raters_code_format;
+alter table public.raters add constraint raters_code_format check (rater_code ~ '^[A-Za-z0-9_-]{1,20}$');
+
+create or replace function public.raters_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare me text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if tg_op = 'UPDATE' then
+    if new.email <> old.email or new.rater_code <> old.rater_code then
+      raise exception 'email and rater code cannot be changed; deactivate and add a new evaluator instead';
+    end if;
+    if old.email = me and (not new.is_admin or not new.active) then
+      raise exception 'you cannot remove your own admin role or access';
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists raters_guard on public.raters;
+create trigger raters_guard before update on public.raters
+  for each row execute function public.raters_guard();
+
+grant insert, update (is_admin, active) on public.raters to authenticated;
+
+drop policy if exists raters_admin_insert on public.raters;
+create policy raters_admin_insert on public.raters for insert to authenticated
+  with check (public.is_admin());
+
+drop policy if exists raters_admin_update on public.raters;
+create policy raters_admin_update on public.raters for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());

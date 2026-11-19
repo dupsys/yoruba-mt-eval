@@ -84,9 +84,30 @@ class SupabaseStore {
     return all;
   }
   async allRaters() {
-    const { data, error } = await this.db.from("raters").select("rater_code,is_admin,active").order("rater_code");
+    const { data, error } = await this.db.from("raters").select("email,rater_code,is_admin,active,created_at").order("rater_code");
     if (error) throw error; return data;
   }
+  async addRater(email, code, isAdmin) {
+    const { error } = await this.db.from("raters").insert({ email: email.trim().toLowerCase(), rater_code: code.trim(),
+      is_admin: !!isAdmin, active: true });
+    if (error) throw friendly(error);
+  }
+  async updateRater(code, fields) {
+    const { data, error } = await this.db.from("raters").update(fields).eq("rater_code", code).select("rater_code");
+    if (error) throw friendly(error);
+    if (!data || !data.length) throw new Error("not updated (are you an admin, and has migration 002 been run?)");
+  }
+}
+
+// Turn database errors into messages an organiser can act on.
+function friendly(e) {
+  const m = String(e.message || e);
+  if (e.code === "23505" || m.includes("duplicate")) return new Error("this email or rater code is already registered");
+  if (m.includes("raters_email_format")) return new Error("that does not look like a valid email address");
+  if (m.includes("raters_code_format")) return new Error("rater codes may use only letters, digits, _ and - (max 20)");
+  if (e.code === "42501" || m.includes("permission denied") || m.includes("row-level security"))
+    return new Error("not allowed: only admins can manage evaluators (if you are an admin, run supabase/migrations/002_admin_manage_raters.sql once)");
+  return new Error(m);
 }
 
 // ---------------------------------------------------------------- Mock (browser only, synthetic data)
@@ -128,7 +149,25 @@ class MockStore {
   pending() { return {}; }
   async flushPending() { return 0; }
   async allRatings() { return Object.values(this.st().ratings || {}); }
-  async allRaters() { return [{ rater_code: "DEMO", is_admin: true, active: true }]; }
+  async allRaters() {
+    const s = this.st();
+    return [{ email: s.email || "demo@example.org", rater_code: "DEMO", is_admin: true, active: true }, ...(s.raters || [])];
+  }
+  async addRater(email, code, isAdmin) {
+    const s = this.st(); s.raters = s.raters || [];
+    email = email.trim().toLowerCase(); code = code.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("that does not look like a valid email address");
+    if (!/^[A-Za-z0-9_-]{1,20}$/.test(code)) throw new Error("rater codes may use only letters, digits, _ and - (max 20)");
+    if (code === "DEMO" || s.raters.some((r) => r.email === email || r.rater_code === code))
+      throw new Error("this email or rater code is already registered");
+    s.raters.push({ email, rater_code: code, is_admin: !!isAdmin, active: true, created_at: new Date().toISOString() });
+    this.put(s);
+  }
+  async updateRater(code, fields) {
+    if (code === "DEMO") throw new Error("you cannot remove your own admin role or access");
+    const s = this.st(); const r = (s.raters || []).find((x) => x.rater_code === code);
+    if (!r) throw new Error("not found"); Object.assign(r, fields); this.put(s);
+  }
 }
 
 export async function makeStore() {

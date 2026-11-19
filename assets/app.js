@@ -266,7 +266,9 @@ function renderProgress() {
 
 async function renderAdmin() {
   if (!state.me.is_admin) return renderHome();
-  main().innerHTML = `<h1>Admin</h1><p class="lede">Progress of all evaluators and exports for the analysis script.</p><div id="adm">Loading…</div>`;
+  main().innerHTML = `<h1>Admin</h1><p class="lede">Manage evaluators, follow their progress and export ratings for the
+    analysis script.</p><div id="raters">Loading…</div><div id="adm"></div>`;
+  renderRaters();
   try {
     const [ratings, raters] = await Promise.all([state.store.allRatings(), state.store.allRaters()]);
     const byRater = {}; for (const r of ratings) (byRater[r.rater_code] ||= []).push(r);
@@ -282,7 +284,7 @@ async function renderAdmin() {
         <td>${pkgs.map((p) => `<button data-r="${esc(x.rater_code)}" data-p="${esc(p)}">TSV ${esc(p)}</button>`).join(" ")}</td></tr>`;
     }).join("");
     const flagged = ratings.filter((r) => r.display_problem || (r.comment && r.comment.trim()));
-    $("#adm").innerHTML = `<div class="card"><table class="data"><thead><tr><th>Rater</th><th>Complete</th><th>Last activity</th>
+    $("#adm").innerHTML = `<div class="card"><h2>Progress and exports</h2><table class="data"><thead><tr><th>Rater</th><th>Complete</th><th>Last activity</th>
       <th>Display problems</th><th>Export</th></tr></thead><tbody>${rows || `<tr><td colspan="5">No evaluators yet.</td></tr>`}</tbody></table>
       <p class="small muted">Each TSV matches the workbook columns. Save them in <code>reports/human_eval/filled_focus/</code> (or <code>filled/</code>)
       and run <code>analyze_human_eval.py --key …_KEY.xlsx …/*_evaluation.tsv</code>.</p></div>
@@ -292,6 +294,61 @@ async function renderAdmin() {
     $("#adm").querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () =>
       downloadTsv(b.dataset.r, b.dataset.p, byRater[b.dataset.r] || [])));
   } catch (e) { $("#adm").innerHTML = `<p class="status err">Could not load: ${esc(e.message || e)}</p>`; }
+}
+
+// ---------------------------------------------------------------- admin: manage evaluators
+async function renderRaters(message) {
+  const box = $("#raters"); if (!box) return;
+  let raters;
+  try { raters = await state.store.allRaters(); }
+  catch (e) { box.innerHTML = `<p class="status err">Could not load evaluators: ${esc(e.message || e)}</p>`; return; }
+  const meCode = state.me.rater_code;
+  box.innerHTML = `<div class="card"><h2>Evaluators</h2>
+    <form id="addr" class="grid-add" autocomplete="off">
+      <div><label class="field" for="nr-email">Email</label><input id="nr-email" type="email" required placeholder="name@example.org"></div>
+      <div><label class="field" for="nr-code">Rater code</label><input id="nr-code" type="text" required maxlength="20"
+        pattern="[A-Za-z0-9_\\-]{1,20}" placeholder="R04" value="${esc(nextCode(raters))}"></div>
+      <div><label class="field" for="nr-role">Role</label><select id="nr-role"><option value="rater">Rater</option>
+        <option value="admin">Admin</option></select></div>
+      <div class="add-btn"><button class="primary" type="submit">Add evaluator</button></div>
+    </form>
+    <p class="status ${message && message.err ? "err" : ""}" id="rst" role="status">${esc(message ? message.text : "")}</p>
+    <p class="small muted">Added evaluators can sign in straight away with that email and see the items. Rater codes
+    appear in exports instead of names. To end someone's access, deactivate them (evaluators are never deleted, so their
+    ratings are kept).</p>
+    <table class="data"><thead><tr><th>Code</th><th>Email</th><th>Role</th><th>Access</th><th></th></tr></thead><tbody>
+    ${raters.map((r) => {
+      const self = r.rater_code === meCode;
+      return `<tr><td><b>${esc(r.rater_code)}</b>${self ? ' <span class="badge">you</span>' : ""}</td><td>${esc(r.email || "")}</td>
+      <td><select data-role="${esc(r.rater_code)}" ${self ? "disabled" : ""} aria-label="Role of ${esc(r.rater_code)}">
+        <option value="rater" ${r.is_admin ? "" : "selected"}>Rater</option><option value="admin" ${r.is_admin ? "selected" : ""}>Admin</option></select></td>
+      <td>${r.active ? '<span class="badge ok">Active</span>' : '<span class="badge warn">Deactivated</span>'}</td>
+      <td>${self ? "" : `<button data-act="${esc(r.rater_code)}" data-on="${r.active ? "0" : "1"}">${r.active ? "Deactivate" : "Reactivate"}</button>`}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+  $("#addr").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const email = $("#nr-email").value, code = $("#nr-code").value, admin = $("#nr-role").value === "admin";
+    $("#rst").className = "status"; $("#rst").textContent = "Adding…";
+    try { await state.store.addRater(email, code, admin);
+      renderRaters({ text: `Added ${code.trim()} (${email.trim().toLowerCase()}) as ${admin ? "admin" : "rater"}.` }); }
+    catch (e) { $("#rst").className = "status err"; $("#rst").textContent = "Not added: " + (e.message || e); }
+  });
+  box.querySelectorAll("select[data-role]").forEach((sel) => sel.addEventListener("change", async () => {
+    const code = sel.dataset.role, admin = sel.value === "admin";
+    try { await state.store.updateRater(code, { is_admin: admin }); renderRaters({ text: `${code} is now ${admin ? "an admin" : "a rater"}.` }); }
+    catch (e) { renderRaters({ err: true, text: "Not changed: " + (e.message || e) }); }
+  }));
+  box.querySelectorAll("button[data-act]").forEach((b) => b.addEventListener("click", async () => {
+    const code = b.dataset.act, on = b.dataset.on === "1";
+    if (!on && !confirm(`Deactivate ${code}? They will lose access immediately; their ratings are kept.`)) return;
+    try { await state.store.updateRater(code, { active: on }); renderRaters({ text: `${code} ${on ? "reactivated" : "deactivated"}.` }); }
+    catch (e) { renderRaters({ err: true, text: "Not changed: " + (e.message || e) }); }
+  }));
+}
+
+function nextCode(raters) {
+  const n = raters.map((r) => /^R(\d+)$/.exec(r.rater_code)).filter(Boolean).map((m) => +m[1]);
+  return "R" + String((n.length ? Math.max(...n) : 0) + 1).padStart(2, "0");
 }
 
 function downloadTsv(code, pkg, ratings) {

@@ -21,8 +21,11 @@ Try the interface without any setup: open `index.html?demo` (synthetic items, st
 3. **Load the items:** run `python eval_dashboard/tools/make_items_sql.py` in the research project (add `--full`
    for the 300-item workbook). It writes `eval_dashboard/private/items_focus.sql` (git-ignored, because it contains
    the test sentences); paste it into the SQL editor and run it.
-4. **Register evaluators:** edit `private/raters_template.sql` with real emails and codes (R01, R02, …; mark
-   yourself `is_admin = true`) and run it. Only registered emails can see items.
+4. **Register yourself as admin:** edit `private/raters_template.sql` with your email and `is_admin = true` and run
+   it. After that, add and manage evaluators from the dashboard's *Admin → Evaluators* section (email, rater code,
+   role); they can sign in immediately. Only registered, active emails can see items.
+   *Projects created before 2026-11-19* must also run `supabase/migrations/002_admin_manage_raters.sql` once to
+   enable that section (new projects get it from `schema.sql`).
 5. **Configure sign-in:** *Authentication → URL Configuration*: set *Site URL* and add a *Redirect URL* equal to the
    site address (e.g. `https://dupsys.github.io/yoruba-mt-eval/`). Supabase's built-in email sender has a low hourly
    limit, which is fine for a few evaluators; for more, add your own SMTP server under *Authentication → Emails*.
@@ -38,7 +41,7 @@ Try the interface without any setup: open `index.html?demo` (synthetic items, st
 * The *Admin* page (admins only) shows progress per evaluator, comments and display problems, and exports
   `<code>_<package>_evaluation.tsv` files. Save them in `reports/human_eval/filled_focus/` and run
   `analyze_human_eval.py --key reports/human_eval/menyo_focus_afrique_vs_nllb13_KEY.xlsx reports/human_eval/filled_focus/*_evaluation.tsv`.
-* To end someone's access: `update public.raters set active = false where rater_code = 'R02';`
+* To end someone's access, use *Deactivate* in *Admin → Evaluators* (ratings are kept).
 * After the study, export a final backup (Supabase *Table Editor → ratings → Export to CSV*) and consider deleting
   the items and evaluator emails.
 
@@ -46,8 +49,8 @@ Try the interface without any setup: open `index.html?demo` (synthetic items, st
 
 ```bash
 pip install pgserver psycopg2-binary pandas openpyxl "playwright==1.56.0" && playwright install chromium
-python tests/test_rls.py     # 28 access-rule checks on a throwaway PostgreSQL
-python tests/test_ui.py      # 21 end-to-end interface checks in demo mode
+python tests/test_rls.py     # 41 access-rule checks on a throwaway PostgreSQL
+python tests/test_ui.py      # 30 end-to-end interface checks in demo mode
 ```
 
 ## Notes

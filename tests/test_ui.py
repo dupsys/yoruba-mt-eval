@@ -39,7 +39,11 @@ def main():
 
         pg.goto(base)
         pg.wait_for_selector("h1")
-        check("unconfigured site explains itself", "Not configured" in pg.inner_text("main"), pg.inner_text("main")[:80])
+        configured = 'supabaseUrl: "https' in (ROOT / "assets" / "config.js").read_text()
+        if configured:
+            check("configured site opens on the sign-in page", pg.is_visible("#email"), pg.inner_text("main")[:80])
+        else:
+            check("unconfigured site explains itself", "Not configured" in pg.inner_text("main"), pg.inner_text("main")[:80])
 
         pg.goto(base + "?demo")
         pg.wait_for_selector("#email")
@@ -120,6 +124,31 @@ def main():
         check("export row 1 carries the ratings", row1["Preference"] == "A better" and row1["Adequacy A"] == "5 - all meaning preserved", row1)
         check("tabs in comments are flattened", row1["Comment"] == "Synthetic test comment, with a tab here.", row1["Comment"])
         check("Yoruba text intact in export", "Ṣọ́ra bí o bá ń yan àwòrán ìdánimọ̀." in text)
+        # evaluator management
+        pg.on("dialog", lambda d: d.accept())
+        pg.wait_for_selector("#addr")
+        check("next free rater code suggested", pg.input_value("#nr-code") == "R01", pg.input_value("#nr-code"))
+        check("own row cannot be changed", pg.is_disabled('select[data-role="DEMO"]'))
+        pg.fill("#nr-email", "New.Rater@Example.org"); pg.select_option("#nr-role", "rater"); pg.click("#addr button[type=submit]")
+        pg.wait_for_function("document.querySelector('#rst') && document.querySelector('#rst').textContent.startsWith('Added')")
+        check("evaluator added (email lower-cased)", "new.rater@example.org" in pg.inner_text("#raters"), pg.inner_text("#rst"))
+        check("code suggestion advances", pg.input_value("#nr-code") == "R02", pg.input_value("#nr-code"))
+        pg.fill("#nr-email", "new.rater@example.org"); pg.fill("#nr-code", "R02"); pg.click("#addr button[type=submit]")
+        pg.wait_for_function("document.querySelector('#rst').textContent.startsWith('Not added')")
+        check("duplicate email rejected", "already registered" in pg.inner_text("#rst"), pg.inner_text("#rst"))
+        pg.fill("#nr-email", "not-an-email@"); pg.evaluate("document.querySelector('#nr-email').type='text'")
+        pg.click("#addr button[type=submit]")
+        pg.wait_for_function("document.querySelector('#rst').textContent.includes('valid email')")
+        check("invalid email rejected", True)
+        pg.select_option('select[data-role="R01"]', "admin")
+        pg.wait_for_function("document.querySelector('#rst').textContent.includes('now an admin')")
+        check("role changed to admin", pg.input_value('select[data-role="R01"]') == "admin")
+        pg.click('button[data-act="R01"]')
+        pg.wait_for_function("document.querySelector('#rst').textContent.includes('deactivated')")
+        check("evaluator deactivated", "Deactivated" in pg.inner_text("#raters"))
+        pg.click('button[data-act="R01"]')
+        pg.wait_for_function("document.querySelector('#rst').textContent.includes('reactivated')")
+        check("evaluator reactivated", pg.inner_text('button[data-act="R01"]') == "Deactivate")
         if SHOTS:
             pg.screenshot(path=str(SHOTS / "ui_admin.png"), full_page=True)
 

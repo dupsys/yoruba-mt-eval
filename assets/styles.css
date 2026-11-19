@@ -92,3 +92,6 @@ table.data th { color: var(--muted); font-weight: 600; }
 label.check { display: flex; gap: 10px; align-items: flex-start; flex-wrap: nowrap; margin-top: 10px; }
 label.check input { margin-top: 4px; flex: none; }
 .sticky-nav { box-shadow: 0 -6px 12px -10px rgba(0,0,0,.35); }
+.grid-add { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 12px; align-items: end; }
+.grid-add .field { margin-top: 0; }
+@media (max-width: 860px) { .grid-add { grid-template-columns: 1fr; } }
