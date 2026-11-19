@@ -6,6 +6,19 @@
 --   * An admin cannot demote or deactivate themselves, so at least one admin always remains.
 --   * Emails are stored in lower case and must look like an email; rater codes are short letters/digits.
 
+-- Existing rows must satisfy the new checks: normalise emails (sign-in already ignores case and spaces), then stop
+-- with a clear message if any email or code is still invalid, instead of failing on the constraint below.
+update public.raters set email = lower(btrim(email)) where email <> lower(btrim(email));
+do $$
+declare bad text;
+begin
+  select string_agg(format('%s (code %s)', email, rater_code), '; ') into bad from public.raters
+  where email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' or rater_code !~ '^[A-Za-z0-9_-]{1,20}$';
+  if bad is not null then
+    raise exception 'Fix these evaluators first (invalid email or rater code), then run this migration again: %', bad;
+  end if;
+end $$;
+
 alter table public.raters drop constraint if exists raters_email_format;
 alter table public.raters add constraint raters_email_format
   check (email = lower(email) and email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$');
