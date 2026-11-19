@@ -1,0 +1,5 @@
+private/
+*.xlsx
+*KEY*
+__pycache__/
+.DS_Store

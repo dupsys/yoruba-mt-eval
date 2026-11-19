@@ -1,0 +1,117 @@
+-- Yorùbá–English MT human evaluation: database schema and access rules (Supabase / PostgreSQL).
+-- Run once in the Supabase SQL editor (Project > SQL Editor > New query > paste > Run).
+--
+-- Access model
+--   * Only emails listed in public.raters (an allowlist kept by the organiser) can read items or save ratings.
+--   * Each rater can read and write only their own ratings and consent; admins (is_admin) can read everything.
+--   * Signed-out visitors (the public "anon" key) can read nothing.
+--   * The answer key (which system is A or B) is never stored here.
+
+-- ---------------------------------------------------------------- tables
+create table if not exists public.raters (
+  email       text primary key,                       -- lower-case sign-in email
+  rater_code  text unique not null,                   -- e.g. R01; used in exports instead of names
+  is_admin    boolean not null default false,
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.items (
+  item_id     text primary key,                       -- matches the workbook / answer key
+  package     text not null,                          -- 'focus' or 'full'
+  position    integer not null,                       -- display order within the package (1 = first)
+  comparison  text,
+  direction   text,                                   -- 'English → Yorùbá' or 'Yorùbá → English'
+  domain      text,
+  source      text not null,
+  output_a    text not null,
+  output_b    text not null,
+  unique (package, position)
+);
+
+create table if not exists public.ratings (
+  rater_code      text not null references public.raters (rater_code) on update cascade,
+  item_id         text not null references public.items (item_id),
+  adequacy_a      text check (adequacy_a in ('5 - all meaning preserved','4 - most meaning','3 - much meaning','2 - little meaning','1 - none')),
+  adequacy_b      text check (adequacy_b in ('5 - all meaning preserved','4 - most meaning','3 - much meaning','2 - little meaning','1 - none')),
+  fluency_a       text check (fluency_a in ('5 - flawless','4 - good','3 - non-native','2 - disfluent','1 - incomprehensible')),
+  fluency_b       text check (fluency_b in ('5 - flawless','4 - good','3 - non-native','2 - disfluent','1 - incomprehensible')),
+  orthography_a   text check (orthography_a in ('Correct','Minor diacritic errors','Major diacritic errors','Not applicable (English output)')),
+  orthography_b   text check (orthography_b in ('Correct','Minor diacritic errors','Major diacritic errors','Not applicable (English output)')),
+  preference      text check (preference in ('A better','B better','Equal','Cannot judge')),
+  main_error      text check (main_error in ('None','Mistranslation','Omission','Addition / hallucination',
+                    'Untranslated / wrong language','Name or number','Terminology','Idiom or proverb meaning',
+                    'Register / honorific','Diacritics / orthography','Grammar / fluency','Repetition / malformed')),
+  comment         text check (char_length(comment) <= 2000),
+  display_problem boolean not null default false,
+  updated_at      timestamptz not null default now(),
+  primary key (rater_code, item_id)
+);
+
+create table if not exists public.consents (
+  rater_code     text primary key references public.raters (rater_code) on update cascade,
+  guide_version  text not null,
+  consented_at   timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------- helpers (security definer: read the allowlist)
+create or replace function public.current_rater_code() returns text
+language sql stable security definer set search_path = public as $$
+  select rater_code from public.raters
+  where email = lower(coalesce(auth.jwt() ->> 'email', '')) and active
+$$;
+
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select is_admin from public.raters
+                   where email = lower(coalesce(auth.jwt() ->> 'email', '')) and active), false)
+$$;
+
+create or replace function public.touch_updated_at() returns trigger
+language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+
+drop trigger if exists ratings_touch on public.ratings;
+create trigger ratings_touch before update on public.ratings
+  for each row execute function public.touch_updated_at();
+
+-- ---------------------------------------------------------------- privileges and row-level security
+revoke all on public.raters, public.items, public.ratings, public.consents from anon, authenticated;  -- then grant only what is needed
+grant select on public.raters, public.items to authenticated;
+grant select, insert, update on public.ratings to authenticated;
+grant select, insert on public.consents to authenticated;
+revoke execute on function public.current_rater_code(), public.is_admin() from anon;
+grant execute on function public.current_rater_code(), public.is_admin() to authenticated;
+
+alter table public.raters   enable row level security;
+alter table public.items    enable row level security;
+alter table public.ratings  enable row level security;
+alter table public.consents enable row level security;
+
+drop policy if exists raters_read on public.raters;
+create policy raters_read on public.raters for select to authenticated
+  using (email = lower(coalesce(auth.jwt() ->> 'email', '')) or public.is_admin());
+
+drop policy if exists items_read on public.items;
+create policy items_read on public.items for select to authenticated
+  using (public.current_rater_code() is not null);
+
+drop policy if exists ratings_read on public.ratings;
+create policy ratings_read on public.ratings for select to authenticated
+  using (rater_code = public.current_rater_code() or public.is_admin());
+
+drop policy if exists ratings_insert on public.ratings;
+create policy ratings_insert on public.ratings for insert to authenticated
+  with check (rater_code = public.current_rater_code());
+
+drop policy if exists ratings_update on public.ratings;
+create policy ratings_update on public.ratings for update to authenticated
+  using (rater_code = public.current_rater_code())
+  with check (rater_code = public.current_rater_code());
+
+drop policy if exists consents_read on public.consents;
+create policy consents_read on public.consents for select to authenticated
+  using (rater_code = public.current_rater_code() or public.is_admin());
+
+drop policy if exists consents_insert on public.consents;
+create policy consents_insert on public.consents for insert to authenticated
+  with check (rater_code = public.current_rater_code());
