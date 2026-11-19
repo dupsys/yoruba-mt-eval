@@ -151,3 +151,13 @@ create policy raters_admin_insert on public.raters for insert to authenticated
 drop policy if exists raters_admin_update on public.raters;
 create policy raters_admin_update on public.raters for update to authenticated
   using (public.is_admin()) with check (public.is_admin());
+
+-- ---------------------------------------------------------------- lock helper functions (migration 003)
+revoke execute on function public.current_rater_code() from public, anon;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.current_rater_code() to authenticated;
+grant execute on function public.is_admin() to authenticated;
+
+-- Trigger functions are not meant to be called directly by anyone.
+revoke execute on function public.touch_updated_at() from public, anon, authenticated;
+revoke execute on function public.raters_guard() from public, anon, authenticated;

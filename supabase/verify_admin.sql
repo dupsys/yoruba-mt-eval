@@ -107,6 +107,12 @@ begin
     begin select count(*) into cnt from public.raters; ok := (cnt = 0);
     exception when others then ok := true; end;
     res := res || array['signed-out visitor cannot read evaluators', case when ok then 'PASS' else 'FAIL' end, ''];
+    begin perform public.is_admin(); ok := false;
+    exception when others then ok := true; end;
+    res := res || array['signed-out visitor cannot call is_admin() (migration 003)', case when ok then 'PASS' else 'FAIL' end, ''];
+    begin perform public.current_rater_code(); ok := false;
+    exception when others then ok := true; end;
+    res := res || array['signed-out visitor cannot call current_rater_code() (migration 003)', case when ok then 'PASS' else 'FAIL' end, ''];
     raise exception 'undo';
   exception when raise_exception then null; end;
 

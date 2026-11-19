@@ -24,8 +24,9 @@ Try the interface without any setup: open `index.html?demo` (synthetic items, st
 4. **Register yourself as admin:** edit `private/raters_template.sql` with your email and `is_admin = true` and run
    it. After that, add and manage evaluators from the dashboard's *Admin → Evaluators* section (email, rater code,
    role); they can sign in immediately. Only registered, active emails can see items.
-   *Projects created before 2026-11-19* must also run `supabase/migrations/002_admin_manage_raters.sql` once to
-   enable that section (new projects get it from `schema.sql`).
+   *Projects created before 2026-11-19* must also run the files in `supabase/migrations/` once, in order (002
+   enables that section; 003 stops signed-out calls to the helper functions); new projects get both from
+   `schema.sql`. `supabase/verify_admin.sql` checks the live rules and undoes its own test changes.
 5. **Configure sign-in:** *Authentication → URL Configuration*: set *Site URL* and add a *Redirect URL* equal to the
    site address (e.g. `https://dupsys.github.io/yoruba-mt-eval/`). Supabase's built-in email sender has a low hourly
    limit, which is fine for a few evaluators; for more, add your own SMTP server under *Authentication → Emails*.
@@ -49,7 +50,7 @@ Try the interface without any setup: open `index.html?demo` (synthetic items, st
 
 ```bash
 pip install pgserver psycopg2-binary pandas openpyxl "playwright==1.56.0" && playwright install chromium
-python tests/test_rls.py     # 41 access-rule checks on a throwaway PostgreSQL
+python tests/test_rls.py     # 46 access-rule checks on a throwaway PostgreSQL
 python tests/test_ui.py      # 30 end-to-end interface checks in demo mode
 ```
 

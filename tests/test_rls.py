@@ -82,6 +82,11 @@ def main():
             check(f"anon cannot read {t}", rc != 0 or out == "0", out + err[:80])
         rc, out, err = psql("insert into public.ratings(rater_code,item_id) values ('R01','T-2');", "anon")
         check("anon cannot write ratings", rc != 0, out)
+        for fn in ("is_admin", "current_rater_code", "touch_updated_at", "raters_guard"):
+            rc, out, err = psql(f"select public.{fn}();", "anon")
+            check(f"anon cannot call {fn}()", rc != 0, out + err[:60])
+        rc, out, err = psql("select public.raters_guard();", "authenticated", "admin@example.org")
+        check("signed-in users cannot call trigger functions directly", rc != 0, out)
         # signed in but not on the allowlist / deactivated
         for em in ("stranger@example.org", "gone@example.org"):
             rc, out, err = psql("select count(*) from public.items;", "authenticated", em)
