@@ -3,17 +3,26 @@
 -- row-level-security rules, records PASS/FAIL for every check, and UNDOES every change it makes
 -- (each check runs in a sub-transaction that is rolled back). Your data is not modified.
 
-create temp table if not exists yoeval_verify (n serial, check_name text, result text, detail text);
-truncate yoeval_verify;
+-- The checks live in a function in the private schema "yoeval_check" (not exposed by the website's API, executable
+-- only by the database owner), and the report is one SELECT, so no temporary tables are needed.
 
-do $$
+create schema if not exists yoeval_check;
+revoke all on schema yoeval_check from public;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then execute 'revoke all on schema yoeval_check from anon'; end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then execute 'revoke all on schema yoeval_check from authenticated'; end if;
+end $$;
+
+create or replace function yoeval_check.verify() returns table (n integer, check_name text, result text, detail text)
+language plpgsql as $$
+#variable_conflict use_column
 declare
+  me text := current_user;
   res text[] := '{}';
   ok boolean; cnt integer; msg text;
   adm constant text := '{"email":"verify-admin@example.org","role":"authenticated"}';
   rat constant text := '{"email":"verify-rater@example.org","role":"authenticated"}';
   neu constant text := '{"email":"verify-new@example.org","role":"authenticated"}';
-  procedure_note text;
 begin
   -- 0. migration objects present
   select count(*) into cnt from pg_policies where schemaname = 'public' and tablename = 'raters'
@@ -116,20 +125,20 @@ begin
     raise exception 'undo';
   exception when raise_exception then null; end;
 
-  perform set_config('role', 'postgres', true);
-  for i in 1 .. array_length(res, 1) / 3 loop
-    insert into yoeval_verify(check_name, result, detail) values (res[3*i-2], res[3*i-1], res[3*i]);
-  end loop;
+  perform set_config('role', me, true);
+  return query select i, res[3*i-2], res[3*i-1], res[3*i] from generate_series(1, array_length(res, 1) / 3) as i;
 end $$;
+revoke all on function yoeval_check.verify() from public;
 
--- Summary of your real setup (counts only), then the check results.
-insert into yoeval_verify(check_name, result, detail)
-select 'setup: items loaded', case when count(*) > 0 then 'INFO' else 'CHECK' end,
-       coalesce(string_agg(package || ': ' || n, ', '), 'none') from (
-  select package, count(*) n from public.items group by package) t;
-insert into yoeval_verify(check_name, result, detail)
-select 'setup: evaluators registered', 'INFO',
-       count(*) filter (where active) || ' active, ' || count(*) filter (where is_admin and active) || ' admin(s)'
-from public.raters where email not like 'verify-%@example.org';
-
-select check_name, result, detail from yoeval_verify order by n;
+-- The check results, then a summary of your real setup (counts only).
+select check_name, result, detail from (
+  select n, check_name, result, detail from yoeval_check.verify()
+  union all
+  select 1000, 'setup: items loaded', case when count(*) > 0 then 'INFO' else 'CHECK' end,
+         coalesce(string_agg(package || ': ' || k, ', '), 'none')
+  from (select package, count(*) k from public.items group by package) t
+  union all
+  select 1001, 'setup: evaluators registered', 'INFO',
+         count(*) filter (where active) || ' active, ' || count(*) filter (where is_admin and active) || ' admin(s)'
+  from public.raters where email not like 'verify-%@example.org'
+) report order by n;

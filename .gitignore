@@ -3,3 +3,4 @@ private/
 *KEY*
 __pycache__/
 .DS_Store
+.testenv/
