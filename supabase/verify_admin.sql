@@ -52,10 +52,12 @@ begin
     insert into public.raters(email, rater_code, is_admin) values ('verify-admin@example.org', 'ZZVADM', true),
       ('verify-rater@example.org', 'ZZVRAT', false);
     perform set_config('request.jwt.claims', adm, true); perform set_config('role', 'authenticated', true);
-    update public.raters set is_admin = true where rater_code = 'ZZVRAT'; get diagnostics cnt = row_count;
-    res := res || array['admin can change a role', case when cnt = 1 then 'PASS' else 'FAIL' end, cnt || ' row(s)'];
-    update public.raters set active = false where rater_code = 'ZZVRAT'; get diagnostics cnt = row_count;
-    res := res || array['admin can deactivate an evaluator', case when cnt = 1 then 'PASS' else 'FAIL' end, cnt || ' row(s)'];
+    begin update public.raters set is_admin = true where rater_code = 'ZZVRAT'; get diagnostics cnt = row_count; msg := cnt || ' row(s)';
+    exception when others then cnt := 0; msg := sqlerrm; end;
+    res := res || array['admin can change a role', case when cnt = 1 then 'PASS' else 'FAIL' end, msg];
+    begin update public.raters set active = false where rater_code = 'ZZVRAT'; get diagnostics cnt = row_count; msg := cnt || ' row(s)';
+    exception when others then cnt := 0; msg := sqlerrm; end;
+    res := res || array['admin can deactivate an evaluator', case when cnt = 1 then 'PASS' else 'FAIL' end, msg];
     perform set_config('request.jwt.claims', rat, true);
     res := res || array['deactivated evaluator loses access',
                         case when public.current_rater_code() is null then 'PASS' else 'FAIL' end, ''];
