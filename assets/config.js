@@ -7,7 +7,7 @@ export const CONFIG = {
   guideVersion: "2026-11-19",
   title: "Yorùbá–English MT Evaluation",
   subtitle: "Human evaluation of machine translation",
-  contact: "",              // shown to raters, e.g. "Organiser name, email"
+  contact: "Organiser, info@dupsy.com",   // shown to raters in the sidebar (public)
   // Mock mode stores everything in this browser and shows synthetic demo items: for testing only.
   mock: new URLSearchParams(location.search).has("demo"),
 };
