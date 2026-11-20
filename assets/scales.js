@@ -16,4 +16,5 @@ export const EXPORT_COLUMNS = [
   ["Source", "source"], ["Output A", "output_a"], ["Output B", "output_b"], ["Adequacy A", "adequacy_a"],
   ["Adequacy B", "adequacy_b"], ["Fluency A", "fluency_a"], ["Fluency B", "fluency_b"],
   ["Orthography A", "orthography_a"], ["Orthography B", "orthography_b"], ["Preference", "preference"],
-  ["Main error (worse output)", "main_error"], ["Comment", "comment"]];
+  ["Main error (worse output)", "main_error"], ["Comment", "comment"],
+  ["Display problem", "display_problem"]];
