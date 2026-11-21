@@ -83,6 +83,36 @@ class SupabaseStore {
     }
     return all;
   }
+  // ---- Task 2: proverb meanings (migration 004; empty list if the migration has not been run)
+  async meaningItems() {
+    const all = []; let from = 0;
+    for (;;) {
+      const { data, error } = await this.db.from("meaning_items").select("*").order("position").range(from, from + 999);
+      if (error) { if (String(error.message).includes("meaning_items")) return []; throw error; }
+      all.push(...data); if (data.length < 1000) break; from += 1000;
+    }
+    return all;
+  }
+  async myMeaningRatings(code) {
+    const { data, error } = await this.db.from("meaning_ratings").select("*").eq("rater_code", code);
+    if (error) { if (String(error.message).includes("meaning_ratings")) return {}; throw error; }
+    return Object.fromEntries(data.map((r) => [r.item_id, r]));
+  }
+  async saveMeaning(code, itemId, fields) {
+    const row = { rater_code: code, item_id: itemId };
+    for (const k of ["judgement", "comment"]) if (k in fields) row[k] = fields[k] === "" ? null : fields[k];
+    const { error } = await this.db.from("meaning_ratings").upsert(row, { onConflict: "rater_code,item_id" });
+    if (error) throw error;
+  }
+  async allMeaningRatings() {
+    const all = []; let from = 0;
+    for (;;) {
+      const { data, error } = await this.db.from("meaning_ratings").select("*").range(from, from + 999);
+      if (error) { if (String(error.message).includes("meaning_ratings")) return []; throw error; }
+      all.push(...data); if (data.length < 1000) break; from += 1000;
+    }
+    return all;
+  }
   async allRaters() {
     const { data, error } = await this.db.from("raters").select("email,rater_code,is_admin,active,created_at").order("rater_code");
     if (error) throw error; return data;
@@ -127,6 +157,22 @@ const DEMO_ITEMS = [
 ].map(([item_id, direction, domain, source, output_a, output_b], i) =>
   ({ item_id, package: "demo", position: i + 1, comparison: "DEMO", direction, domain, source, output_a, output_b }));
 
+const DEMO_MEANING = [
+  ["DEMO-M1", "Ká dijú ká ṣe bí ẹní kú, ká wo ẹni tí yóò sunkún ẹni; ká sáré ṣẹ́ṣẹ́ ká fẹsẹ̀ kọ, ká wo ẹni tí yóò ṣeni pẹ̀lẹ́.",
+   "Close your eyes and feign death to see who'll mourn you; run and ensure you trip to see those who truly care.",
+   "Adversities often show true friends.",
+   "Hard times reveal who really cares about you."],
+  ["DEMO-M2", "A kì í sọ òkò sí ẹyẹ tó ńwá ọ̀nà àti fò.",
+   "Do not throw stones at a bird that wants to fly away.",
+   "Do not pre-empt or worsen an already deplorable situation.",
+   "Birds should be protected and not hunted when they try to escape."],
+  ["DEMO-M3", "Ọ̀rọ̀ tó ńpa olóko l'ẹ́kún, ni àparò fí ńṣe ẹ̀rin rín, nínú igbó.",
+   "What troubles the farmer is what amuses the partridge in the forest.",
+   "What challenges one is what inspires another.",
+   "Farmers and birds are natural enemies, so they never agree."],
+].map(([item_id, proverb, literal, stated_meaning, explanation], i) =>
+  ({ item_id, position: i + 1, proverb, literal, stated_meaning, explanation }));
+
 class MockStore {
   async init() { this.k = "yoeval-mock"; }
   st() { try { return JSON.parse(localStorage.getItem(this.k) || "{}"); } catch { return {}; } }
@@ -148,6 +194,15 @@ class MockStore {
   }
   pending() { return {}; }
   async flushPending() { return 0; }
+  async meaningItems() { return DEMO_MEANING; }
+  async myMeaningRatings() { return this.st().meaning || {}; }
+  async saveMeaning(code, itemId, fields) {
+    const s = this.st(); s.meaning = s.meaning || {};
+    s.meaning[itemId] = { ...(s.meaning[itemId] || {}), ...fields, rater_code: code, item_id: itemId,
+      updated_at: new Date().toISOString() };
+    this.put(s);
+  }
+  async allMeaningRatings() { return Object.values(this.st().meaning || {}); }
   async allRatings() { return Object.values(this.st().ratings || {}); }
   async allRaters() {
     const s = this.st();

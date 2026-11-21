@@ -1,12 +1,12 @@
 // Yorùbá–English MT Evaluation: single-page app (no build step).
 import { CONFIG } from "./config.js";
 import { makeStore, isComplete } from "./store.js";
-import { ADEQ, FLU, ORTH, ORTH_NA, PREF, ERR, EXPORT_COLUMNS } from "./scales.js";
+import { ADEQ, FLU, ORTH, ORTH_NA, PREF, ERR, EXPORT_COLUMNS, MEANING, MEANING_EXPORT_COLUMNS } from "./scales.js";
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const main = () => $("#main");
-const state = { store: null, me: null, items: [], ratings: {}, pkg: null, idx: 0, consent: false };
+const state = { store: null, me: null, items: [], ratings: {}, pkg: null, idx: 0, consent: false, mItems: [], mRatings: {} };
 
 // ---------------------------------------------------------------- boot and routing
 async function boot() {
@@ -36,6 +36,8 @@ async function refreshUser() {
 async function loadData() {
   state.items = await state.store.items();
   state.ratings = await state.store.myRatings(state.me.rater_code);
+  state.mItems = await state.store.meaningItems();
+  state.mRatings = await state.store.myMeaningRatings(state.me.rater_code);
   const pkgs = [...new Set(state.items.map((i) => i.package))];
   if (!state.pkg || !pkgs.includes(state.pkg)) state.pkg = pkgs[0] || null;
   await retryPending();
@@ -51,13 +53,15 @@ function route() {
   if (!state.me) return renderSignIn();
   if (!state.me.rater_code) return renderNotRegistered();
   if (!state.consent && page !== "guide") return renderConsent();
-  ({ home: renderHome, guide: renderGuide, evaluate: () => renderEvaluate(arg), progress: renderProgress,
-     admin: renderAdmin }[page] || renderHome)();
+  ({ home: renderHome, guide: renderGuide, evaluate: () => renderEvaluate(arg), meaning: () => renderMeaning(arg),
+     progress: renderProgress, admin: renderAdmin }[page] || renderHome)();
   main().focus?.();
 }
 
 function renderSide(active) {
-  const links = [["home", "Overview"], ["guide", "Guide"], ["evaluate", "Evaluate"], ["progress", "My progress"]];
+  const links = [["home", "Overview"], ["guide", "Guide"], ["evaluate", "Evaluate"]];
+  if (state.mItems.length) links.push(["meaning", "Proverb meanings"]);
+  links.push(["progress", "My progress"]);
   if (state.me?.is_admin) links.push(["admin", "Admin"]);
   const signed = !!state.me;
   $("#menu").innerHTML = signed ? links.map(([k, v]) =>
@@ -137,6 +141,11 @@ function renderHome() {
   ${pkgs.length > 1 ? `<label class="field" for="pkg">Package</label><select id="pkg">${pkgs.map((p) => `<option ${p === state.pkg ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>` : ""}
   <div class="row" style="margin-top:14px"><button class="primary" id="cont">${c.done ? "Continue" : "Start evaluating"}</button>
   <a href="#/guide">Read the guide</a></div></div>
+  ${state.mItems.length ? (() => { const m = mCounts(); return `<div class="card"><div class="row" style="justify-content:space-between">
+  <h2 style="margin:0">Task 2: proverb meanings</h2><span class="badge ${m.done === m.total ? "ok" : ""}">${m.done} of ${m.total} judged</span></div>
+  <p class="small">Read a Yorùbá proverb, its stated meaning and a computer-generated explanation, and judge whether the explanation
+  gets the meaning right.</p><div class="progress" style="margin:8px 0 12px"><div style="width:${m.pct}%"></div></div>
+  <a class="btn" href="#/meaning/${mFirstOpen() + 1}">${m.done ? "Continue" : "Start"} proverb meanings</a></div>`; })() : ""}
   <div class="grid2"><div class="card soft"><h2>First 20 items: calibration</h2><p class="small">The first 20 items are discussed
   with the team before you continue alone, so that everyone uses the scales in the same way.</p></div>
   <div class="card soft"><h2>Judge against the source</h2><p class="small">There is no reference translation. A translation can be
@@ -168,6 +177,12 @@ function renderGuide() {
   Preference <i>A better</i> · Main error <i>Diacritics / orthography</i>. (A is a MENYO-20k training sentence, CC BY-NC 4.0;
   B is the same text with its diacritics removed.)</p></div>
   <div class="card"><h2>Error types</h2><ul>${ERR.slice(1).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>
+  ${state.mItems.length ? `<div class="card"><h2>Task 2: proverb meanings</h2><p>Each item shows a Yorùbá proverb, its literal
+  English translation, its <b>stated meaning</b> and an <b>explanation</b> written by a computer system. Judge whether the
+  explanation conveys what the proverb means. The system is hidden; the same proverb appears several times with different
+  explanations, in random order. Judge each explanation on its own.</p><ul>${MEANING.map(([v, d]) => `<li><b>${esc(v)}</b>: ${esc(d)}</li>`).join("")}</ul>
+  <p class="small">Use <i>Different but valid</i> only for a meaning the proverb really has in Yorùbá usage, not for any
+  sensible-sounding lesson. Ignore spelling and style; judge the meaning.</p></div>` : ""}
   <div class="card"><h2>Rules</h2><ul><li>Work alone; do not discuss items with other evaluators until everyone has finished.</li>
   <li>Do not use machine translation or search for the sentences online.</li>
   <li>Keep the sentences confidential (non-commercial research data).</li>
@@ -239,7 +254,7 @@ function renderEvaluate(arg) {
 
 function go(n) { location.hash = `#/evaluate/${n}`; }
 function onKey(e) {
-  if (!location.hash.startsWith("#/evaluate") || !e.altKey) return;
+  if (!(location.hash.startsWith("#/evaluate") || location.hash.startsWith("#/meaning")) || !e.altKey) return;
   if (e.key === "ArrowRight") { e.preventDefault(); $("#next")?.click(); }
   if (e.key === "ArrowLeft") { e.preventDefault(); $("#prev")?.click(); }
 }
@@ -252,6 +267,68 @@ async function retryPending() {
   try { await state.store.flushPending(state.me.rater_code); } catch { /* still offline; try again later */ }
 }
 
+// ---------------------------------------------------------------- Task 2: proverb meanings
+function mCounts() {
+  const done = state.mItems.filter((i) => state.mRatings[i.item_id]?.judgement).length;
+  return { done, total: state.mItems.length, pct: state.mItems.length ? Math.round(100 * done / state.mItems.length) : 0 };
+}
+function mFirstOpen() { const i = state.mItems.findIndex((x) => !state.mRatings[x.item_id]?.judgement); return i < 0 ? 0 : i; }
+
+function renderMeaning(arg) {
+  const items = state.mItems;
+  if (!items.length) { main().innerHTML = `<h1>No proverb items</h1><p class="lede">No proverb items have been loaded yet.</p>`; return; }
+  const idx = Math.min(Math.max((parseInt(arg, 10) || mFirstOpen() + 1) - 1, 0), items.length - 1);
+  const it = items[idx], r = state.mRatings[it.item_id] || {}, c = mCounts();
+  main().innerHTML = `<div class="row" style="justify-content:space-between"><h1 style="margin:0">Proverb ${idx + 1} of ${items.length}</h1>
+    <span class="badge">Proverb meanings</span></div>
+    <div class="progress" style="margin:12px 0 20px" aria-label="${c.done} of ${c.total} judged"><div style="width:${c.pct}%"></div></div>
+    <div class="card soft"><div class="label">Proverb (Yorùbá)</div><p class="text-block" lang="yo">${esc(it.proverb)}</p>
+    <div class="label">Literal translation</div><p class="text-block" lang="en">${esc(it.literal)}</p>
+    <div class="label">Stated meaning</div><p class="text-block" lang="en">${esc(it.stated_meaning)}</p></div>
+    <div class="card"><div class="label">Explanation to judge</div><p class="text-block" lang="en">${esc(it.explanation)}</p>
+    <label class="field">Does the explanation convey the proverb's meaning?</label>
+    <div class="choices vertical" role="group" data-field="judgement">${MEANING.map(([v, d]) =>
+      `<button type="button" data-v="${esc(v)}" aria-pressed="${v === r.judgement}"><b>${esc(v)}</b> <span class="hint">${esc(d)}</span></button>`).join("")}</div>
+    <label class="field" for="mcmt">Comment <span class="hint">optional</span></label>
+    <textarea id="mcmt" maxlength="2000">${esc(r.comment || "")}</textarea></div>
+    <div class="sticky-nav row" style="justify-content:space-between">
+    <div class="row"><button id="prev" ${idx === 0 ? "disabled" : ""}>← Previous</button>
+    <button class="primary" id="next">${idx === items.length - 1 ? "Finish" : "Next →"}</button>
+    <button id="open">Next unjudged</button></div>
+    <span class="status" id="st" role="status">${r.judgement ? "Judged · saved" : "Not judged yet"}</span></div>`;
+  const save = debounce(async (fields) => {
+    const st = $("#st"); if (!st) return;
+    st.className = "status"; st.textContent = "Saving…";
+    state.mRatings[it.item_id] = { ...(state.mRatings[it.item_id] || {}), ...fields, item_id: it.item_id };
+    try {
+      await state.store.saveMeaning(state.me.rater_code, it.item_id, fields);
+      st.textContent = (state.mRatings[it.item_id].judgement ? "Judged · saved " : "Saved ") + new Date().toLocaleTimeString();
+    } catch (e) { st.className = "status err"; st.textContent = "Not saved: " + (e.message || e) + " (please try again)"; }
+  }, 350);
+  main().querySelector(".choices").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    main().querySelectorAll(".choices button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    save({ judgement: b.dataset.v });
+  });
+  $("#mcmt").addEventListener("input", (e) => save({ comment: e.target.value }));
+  const goM = (n) => { location.hash = `#/meaning/${n}`; };
+  $("#prev").addEventListener("click", () => goM(idx));
+  $("#next").addEventListener("click", () => idx === items.length - 1 ? (location.hash = "#/progress") : goM(idx + 2));
+  $("#open").addEventListener("click", () => goM(mFirstOpen() + 1));
+}
+
+function downloadMeaningTsv(code, ratings) {
+  const byId = Object.fromEntries(ratings.map((r) => [r.item_id, r]));
+  const lines = [MEANING_EXPORT_COLUMNS.map(([h]) => h).join("\t")];
+  for (const it of state.mItems) {
+    const row = { ...it, ...(byId[it.item_id] || {}) };
+    lines.push(MEANING_EXPORT_COLUMNS.map(([, k]) => String(row[k] ?? "").replace(/[\t\r\n]+/g, " ")).join("\t"));
+  }
+  const blob = new Blob(["﻿" + lines.join("\n") + "\n"], { type: "text/tab-separated-values;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `${code}_meaning_judgements.tsv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
 // ---------------------------------------------------------------- progress and admin
 function renderProgress() {
   const items = pkgItems(), c = counts(items);
@@ -260,6 +337,8 @@ function renderProgress() {
   <div class="card"><div class="cells">${items.map((it, i) => {
     const r = state.ratings[it.item_id];
     return `<a href="#/evaluate/${i + 1}" class="${isComplete(r) ? "done" : r ? "partial" : ""}" title="${esc(it.item_id)}">${i + 1}</a>`; }).join("")}</div></div>
+  ${state.mItems.length ? `<div class="card"><h2>Proverb meanings: ${mCounts().done} of ${mCounts().total} judged</h2><div class="cells">${state.mItems.map((it, i) =>
+    `<a href="#/meaning/${i + 1}" class="${state.mRatings[it.item_id]?.judgement ? "done" : ""}" title="${esc(it.item_id)}">${i + 1}</a>`).join("")}</div></div>` : ""}
   ${c.done === c.total && c.total ? `<div class="card soft"><h2>All done, thank you!</h2><p>Your ratings are saved. You can still
   revise any item. Please let the organisers know that you have finished.</p></div>` : ""}`;
 }
@@ -293,6 +372,21 @@ async function renderAdmin() {
       <td>${r.display_problem ? "yes" : ""}</td><td>${esc(r.comment || "")}</td></tr>`).join("")}</tbody></table></div>`;
     $("#adm").querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () =>
       downloadTsv(b.dataset.r, b.dataset.p, byRater[b.dataset.r] || [])));
+    if (state.mItems.length) {
+      const mr = await state.store.allMeaningRatings();
+      const mBy = {}; for (const r of mr) (mBy[r.rater_code] ||= []).push(r);
+      const mRows = raters.filter((x) => !x.is_admin || mBy[x.rater_code]).map((x) => {
+        const rs = mBy[x.rater_code] || [];
+        const last = rs.map((r) => r.updated_at).sort().pop();
+        return `<tr><td><b>${esc(x.rater_code)}</b>${x.active ? "" : " (inactive)"}</td><td>${rs.filter((r) => r.judgement).length}/${state.mItems.length}</td>
+          <td>${last ? new Date(last).toLocaleString() : "—"}</td><td><button data-m="${esc(x.rater_code)}">TSV meanings</button></td></tr>`; }).join("");
+      $("#adm").insertAdjacentHTML("beforeend", `<div class="card"><h2>Proverb meanings: progress and exports</h2><table class="data">
+        <thead><tr><th>Rater</th><th>Judged</th><th>Last activity</th><th>Export</th></tr></thead><tbody>${mRows ||
+        `<tr><td colspan="4">No judgements yet.</td></tr>`}</tbody></table><p class="small muted">Save the files in
+        <code>reports/proverbs/human_meaning/</code>; the answer key (which model and condition wrote each explanation) is kept offline.</p></div>`);
+      $("#adm").querySelectorAll("button[data-m]").forEach((b) => b.addEventListener("click", () =>
+        downloadMeaningTsv(b.dataset.m, mBy[b.dataset.m] || [])));
+    }
   } catch (e) { $("#adm").innerHTML = `<p class="status err">Could not load: ${esc(e.message || e)}</p>`; }
 }
 

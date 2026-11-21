@@ -61,3 +61,18 @@ python tests/test_ui.py      # 30 end-to-end interface checks in demo mode
 * Fonts: Exo 2 (interface) and Noto Sans (evaluation text, chosen for its support of Yorùbá combining diacritics),
   loaded from Google Fonts.
 * `noindex` is set so search engines do not list the site.
+
+## Task 2: proverb meanings (added 2026-11-21)
+
+Raters judge whether a model's explanation of a Yorùbá proverb conveys its meaning (Correct, Different but valid,
+Partly correct, Literal only, Wrong, Cannot judge). Items show the proverb, its literal translation, its stated
+meaning and one explanation; the model and condition are hidden and the answer key never leaves this machine.
+
+1. Supabase SQL editor: run `supabase/migrations/004_meaning_task.sql` once (safe to re-run).
+2. Build the items (after the proverb benchmark's meaning runs have finished):
+   `.venv/bin/python eval_dashboard/tools/make_meaning_items.py` → `private/meaning_items.sql` and the answer key
+   `reports/proverbs/human_meaning/meaning_KEY.csv` (keep private).
+3. Paste `private/meaning_items.sql` into the SQL editor and run it. The "Proverb meanings" menu appears for every
+   evaluator as soon as items exist.
+4. Admin → "Proverb meanings: progress and exports": download each rater's `…_meaning_judgements.tsv` into
+   `reports/proverbs/human_meaning/`.

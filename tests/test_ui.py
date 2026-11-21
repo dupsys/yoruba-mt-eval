@@ -108,7 +108,39 @@ def main():
         if SHOTS:
             pg.screenshot(path=str(SHOTS / "ui_progress.png"), full_page=True)
 
+        # ---- Task 2: proverb meanings
+        check("menu shows Proverb meanings", "Proverb meanings" in pg.inner_text("#menu"))
+        pg.goto(base + "?demo#/meaning/1")
+        pg.wait_for_selector("text=Proverb 1 of 3")
+        check("meaning item shows proverb, literal, stated meaning and explanation",
+              all(k.casefold() in pg.inner_text("main").casefold() for k in ("Proverb (Yorùbá)", "Literal translation", "Stated meaning", "Explanation to judge")),
+              pg.inner_text("main")[:200])
+        check("six judgement options", pg.locator('[data-field=judgement] button').count() == 6)
+        pg.click('[data-field=judgement] button[data-v="Correct"]')
+        pg.fill("#mcmt", "Synthetic meaning comment")
+        pg.wait_for_function("document.querySelector('#st').textContent.startsWith('Judged')", timeout=5000)
+        check("meaning judgement saved", "Judged" in pg.inner_text("#st"), pg.inner_text("#st"))
+        pg.keyboard.press("Alt+ArrowRight")
+        pg.wait_for_selector("text=Proverb 2 of 3")
+        pg.click('[data-field=judgement] button[data-v="Literal only"]')
+        pg.wait_for_function("document.querySelector('#st').textContent.startsWith('Judged')", timeout=5000)
+        pg.reload()
+        pg.wait_for_selector("text=Proverb 2 of 3")
+        check("meaning judgement persists after reload",
+              pg.get_attribute('[data-field=judgement] button[data-v="Literal only"]', "aria-pressed") == "true")
+        pg.goto(base + "?demo#/progress")
+        pg.wait_for_selector("text=Proverb meanings: 2 of 3 judged")
+        check("progress shows meaning judgements", True)
+
         pg.goto(base + "?demo#/admin")
+        pg.wait_for_selector("button[data-m]")
+        with pg.expect_download() as dlm:
+            pg.click("button[data-m]")
+        mt = Path(dlm.value.path()).read_bytes().decode("utf-8-sig").strip("\n").split("\n")
+        mh = mt[0].split("\t")
+        check("meaning export columns", mh == ["Item ID", "Proverb", "Literal", "Stated meaning", "Explanation", "Judgement", "Comment"], mh)
+        m1 = dict(zip(mh, mt[1].split("\t")))
+        check("meaning export carries judgement and Yoruba text", m1["Judgement"] == "Correct" and m1["Proverb"].startswith("Ká dijú ká ṣe bí ẹní kú") and len(mt) == 4, m1)
         pg.wait_for_selector("button[data-r]")
         with pg.expect_download() as dl:
             pg.click("button[data-r]")

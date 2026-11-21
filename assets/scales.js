@@ -18,3 +18,14 @@ export const EXPORT_COLUMNS = [
   ["Orthography A", "orthography_a"], ["Orthography B", "orthography_b"], ["Preference", "preference"],
   ["Main error (worse output)", "main_error"], ["Comment", "comment"],
   ["Display problem", "display_problem"]];
+
+// Task 2: proverb meanings (migration 004). Values must match the meaning_ratings CHECK constraint.
+export const MEANING = [
+  ["Correct", "conveys the stated meaning; the wording may differ"],
+  ["Different but valid", "not the stated meaning, but a meaning this proverb genuinely has"],
+  ["Partly correct", "related to the stated meaning but misses or distorts its main point"],
+  ["Literal only", "restates the literal picture without giving the lesson"],
+  ["Wrong", "a meaning the proverb does not have"],
+  ["Cannot judge", "only if you truly cannot decide"]];
+export const MEANING_EXPORT_COLUMNS = [["Item ID", "item_id"], ["Proverb", "proverb"], ["Literal", "literal"],
+  ["Stated meaning", "stated_meaning"], ["Explanation", "explanation"], ["Judgement", "judgement"], ["Comment", "comment"]];

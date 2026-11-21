@@ -34,7 +34,12 @@ insert into public.items(item_id, package, position, direction, source, output_a
   ('T-2','focus',2,'English → Yorùbá','demo source 2','demo A 2','demo B 2'),
   ('T-3','focus',3,'Yorùbá → English','demo source 3','demo A 3','demo B 3');
 insert into public.ratings(rater_code, item_id, preference) values ('R02','T-1','B better');
+insert into public.meaning_items(item_id, position, proverb, literal, stated_meaning, explanation) values
+  ('M001',1,'demo proverb 1','demo literal 1','demo meaning 1','demo explanation 1'),
+  ('M002',2,'demo proverb 2','demo literal 2','demo meaning 2','demo explanation 2');
+insert into public.meaning_ratings(rater_code, item_id, judgement) values ('R02','M001','Wrong');
 """
+MIGRATION_004 = (HERE / "supabase" / "migrations" / "004_meaning_task.sql").read_text()
 
 
 CONN = None
@@ -169,6 +174,45 @@ def main():
         check("upper-case email rejected (the app lower-cases it)", rc != 0, out)
         rc, out, err = psql("insert into public.raters(email, rater_code) values ('ok@example.org','bad code!');", "authenticated", "admin@example.org")
         check("invalid rater code rejected", rc != 0, out)
+        # ---- Task 2: proverb meanings (migration 004)
+        rc, _, err = psql(MIGRATION_004)
+        check("migration 004 can be re-run safely", rc == 0, err[:120])
+        rc, out, err = psql("select count(*) from public.meaning_items;", "anon")
+        check("signed-out users cannot read proverb items", rc != 0 or out == "0", out)
+        rc, out, _ = psql("select count(*) from public.meaning_items;", "authenticated", "r1@example.org")
+        check("raters can read proverb items", out == "2", out)
+        rc, out, _ = psql("select count(*) from public.meaning_items;", "authenticated", "stranger@example.org")
+        check("unregistered users see no proverb items", out == "0", out)
+        rc, out, err = psql("insert into public.meaning_ratings(rater_code,item_id,judgement) values ('R01','M001','Correct') returning judgement;",
+                            "authenticated", "r1@example.org")
+        check("rater can save own judgement", rc == 0 and out == "Correct", out + err[:80])
+        rc, out, err = psql("update public.meaning_ratings set judgement='Partly correct' where rater_code='R01' and item_id='M001' returning judgement;",
+                            "authenticated", "r1@example.org")
+        check("rater can change own judgement", rc == 0 and out == "Partly correct", out + err[:80])
+        rc, out, err = psql("insert into public.meaning_ratings(rater_code,item_id,judgement) values ('R02','M002','Correct');",
+                            "authenticated", "r1@example.org")
+        check("rater cannot judge as someone else", rc != 0, out)
+        rc, out, err = psql("insert into public.meaning_ratings(rater_code,item_id,judgement) values ('R01','M002','Excellent');",
+                            "authenticated", "r1@example.org")
+        check("invalid judgement value rejected", rc != 0, out)
+        rc, out, _ = psql("select count(*) from public.meaning_ratings;", "authenticated", "r1@example.org")
+        check("rater sees only own judgements", out == "1", out)
+        rc, out, _ = psql("select count(*) from public.meaning_ratings where rater_code='R02';", "authenticated", "r1@example.org")
+        check("rater cannot read others' judgements", out == "0", out)
+        rc, out, _ = psql("select count(*) from public.meaning_ratings;", "authenticated", "admin@example.org")
+        check("admin reads all judgements", out == "2", out)
+        rc, out, err = psql("update public.meaning_ratings set judgement='Correct' where rater_code='R02' returning 1;",
+                            "authenticated", "r1@example.org")
+        check("rater cannot change others' judgements", rc != 0 or out == "", out)
+        rc, out, err = psql("delete from public.meaning_ratings where rater_code='R01';", "authenticated", "r1@example.org")
+        check("judgements cannot be deleted by raters", rc != 0, out)
+        for sql, name in (("insert into public.meaning_items values ('M9',9,'p','l','m','e');", "add"),
+                          ("update public.meaning_items set explanation='x';", "edit"),
+                          ("delete from public.meaning_items;", "delete")):
+            rc, out, err = psql(sql, "authenticated", "admin@example.org")
+            check(f"proverb items cannot be {name}ed from the website (even by admins)", rc != 0, out)
+        rc, out, _ = psql("select count(*) from public.meaning_items;", "authenticated", "gone@example.org")
+        check("deactivated evaluator cannot read proverb items", out == "0", out)
         print(f"\n{sum(results)}/{len(results)} access-rule checks passed")
         return 0 if all(results) else 1
     finally:
