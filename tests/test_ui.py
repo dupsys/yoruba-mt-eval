@@ -132,6 +132,24 @@ def main():
         pg.wait_for_selector("text=Proverb meanings: 2 of 3 judged")
         check("progress shows meaning judgements", True)
 
+        # ---- Rater progress (admin monitoring)
+        check("menu shows Rater progress for admins", "Rater progress" in pg.inner_text("#menu"))
+        pg.goto(base + "?demo#/monitor")
+        pg.wait_for_selector("#mon table.data")
+        mon = pg.inner_text("#mon")
+        check("monitor shows both task summaries", "Task 1: compare translations (6 items)" in mon and "Task 2: proverb meanings (3 items)" in mon, mon[:200])
+        row = pg.inner_text("#mon tbody tr")
+        check("monitor row shows Task 1 and Task 2 progress", "2/6" in row and "2/3" in row and "In progress" in row, row)
+        check("monitor shows consent", "✓" in row, row)
+        pg.click("#mon a[href='#/monitor/DEMO']")
+        pg.wait_for_selector("#detail")
+        det = pg.inner_text("#detail")
+        check("details show answer distributions and open items",
+              "A better: 2" in det and "Correct: 1" in det and "Literal only: 1" in det and "not yet complete: 2, 4, 5, 6" in det, det[:300])
+        pg.click("#mon-refresh")
+        pg.wait_for_selector("#detail")
+        check("refresh keeps the selected rater", "Details: DEMO" in pg.inner_text("#detail"))
+
         pg.goto(base + "?demo#/admin")
         pg.wait_for_selector("button[data-m]")
         with pg.expect_download() as dlm:

@@ -82,7 +82,8 @@ table.data th { color: var(--muted); font-weight: 600; }
 .sticky-nav { position: sticky; bottom: 0; background: var(--paper); padding: 12px 0; border-top: 1px solid var(--line); margin-top: 8px; }
 .menu-toggle { display: none; }
 @media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  main { min-width: 0; }
   aside.side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; }
   nav.menu { flex-direction: row; flex-wrap: wrap; width: 100%; }
   .side-foot { margin-top: 0; flex-direction: row; flex-wrap: wrap; width: 100%; }
@@ -101,3 +102,5 @@ label.check input { margin-top: 4px; flex: none; }
 .choices.vertical button .hint { font-weight: normal; }
 .choices.vertical button[aria-pressed="true"] .hint { color: inherit; opacity: .9; }
 a.btn { display: inline-block; text-decoration: none; padding: 8px 14px; border-radius: 8px; }
+.status.warn { color: var(--warn); }
+main { min-width: 0; }   /* wide tables scroll inside their card instead of widening the page */

@@ -62,7 +62,7 @@ function route() {
   if (!state.me.rater_code) return renderNotRegistered();
   if (!state.consent && page !== "guide") return renderConsent();
   ({ home: renderHome, guide: renderGuide, evaluate: () => renderEvaluate(arg), meaning: () => renderMeaning(arg),
-     progress: renderProgress, admin: renderAdmin }[page] || renderHome)();
+     progress: renderProgress, admin: renderAdmin, monitor: () => renderMonitor(arg) }[page] || renderHome)();
   main().focus?.();
 }
 
@@ -70,7 +70,7 @@ function renderSide(active) {
   const links = [["home", "Overview"], ["guide", "Guide"], ["evaluate", "Evaluate"]];
   if (state.mItems.length) links.push(["meaning", "Proverb meanings"]);
   links.push(["progress", "My progress"]);
-  if (state.me?.is_admin) links.push(["admin", "Admin"]);
+  if (state.me?.is_admin) links.push(["monitor", "Rater progress"], ["admin", "Admin"]);
   const signed = !!state.me;
   $("#menu").innerHTML = signed ? links.map(([k, v]) =>
     `<a href="#/${k}" class="${k === active ? "active" : ""}">${v}</a>`).join("") : "";
@@ -407,6 +407,90 @@ async function renderAdmin() {
         downloadMeaningTsv(b.dataset.m, mBy[b.dataset.m] || [])));
     }
   } catch (e) { $("#adm").innerHTML = `<p class="status err">Could not load: ${esc(e.message || e)}</p>`; }
+}
+
+
+// ---------------------------------------------------------------- admin: rater progress (monitoring)
+// Estimated active time: the gaps between a rater's successive saves, counting only gaps of at most 15 minutes
+// (longer gaps are breaks). Only the latest save per item is stored, so this is a lower bound.
+function activeMinutes(times) {
+  const t = times.filter(Boolean).map((x) => new Date(x).getTime()).sort((a, b) => a - b);
+  let m = 0; for (let i = 1; i < t.length; i++) { const g = (t[i] - t[i - 1]) / 60000; if (g <= 15) m += g; }
+  return m;
+}
+const fmtMin = (m) => m < 1 ? "—" : m < 90 ? `${Math.round(m)} min` : `${(m / 60).toFixed(1)} h`;
+const ago = (t) => { if (!t) return "never"; const m = (Date.now() - new Date(t).getTime()) / 60000;
+  return m < 2 ? "just now" : m < 120 ? `${Math.round(m)} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(); };
+const bar = (done, total) => `<div class="progress" style="min-width:90px" title="${done}/${total}"><div style="width:${total ? Math.round(100 * done / total) : 0}%"></div></div>`;
+const count = (arr, key) => arr.reduce((o, r) => (r[key] ? (o[r[key]] = (o[r[key]] || 0) + 1) : 0, o), {});
+let monitorTimer = null;
+
+async function renderMonitor(code) {
+  if (!state.me.is_admin) return renderHome();
+  clearInterval(monitorTimer);
+  if (!$("#mon")) main().innerHTML = `<div class="row" style="justify-content:space-between"><h1 style="margin:0">Rater progress</h1>
+    <span class="row"><span class="small muted" id="mon-time"></span><button id="mon-refresh">Refresh</button></span></div>
+    <p class="lede">What each evaluator has done so far. Refreshes every minute while this page is open.</p><div id="mon">Loading…</div>`;
+  $("#mon-refresh").onclick = () => renderMonitor(code);
+  try {
+    const [raters, ratings, mratings, consents] = await Promise.all([state.store.allRaters(), state.store.allRatings(),
+      state.mItems.length ? state.store.allMeaningRatings() : [], state.store.allConsents()]);
+    const t1 = state.items.filter((i) => i.package === (state.pkg || "focus"));
+    const t1ids = new Set(t1.map((i) => i.item_id)), t2n = state.mItems.length;
+    const consented = Object.fromEntries(consents.map((c) => [c.rater_code, c.consented_at]));
+    const by = (arr) => { const o = {}; for (const r of arr) (o[r.rater_code] ||= []).push(r); return o; };
+    const r1 = by(ratings.filter((r) => t1ids.has(r.item_id))), r2 = by(mratings);
+    const people = raters.filter((x) => x.active || r1[x.rater_code] || r2[x.rater_code]).map((x) => {
+      const a = r1[x.rater_code] || [], m = r2[x.rater_code] || [];
+      const done1 = a.filter(isComplete).length, done2 = m.filter((r) => r.judgement).length;
+      const times = [...a, ...m].map((r) => r.updated_at), act = activeMinutes(times);
+      const status = (done, total, started) => !total ? "—" : done >= total ? "Finished" : started ? "In progress" : "Not started";
+      return { ...x, consent: consented[x.rater_code], a, m, done1, done2, started1: a.length,
+        s1: status(done1, t1.length, a.length), s2: status(done2, t2n, m.length),
+        last: times.filter(Boolean).sort().pop(), act, pace: act >= 5 ? Math.round((done1 + done2) / (act / 60)) : null };
+    });
+    const tally = (k) => ({ fin: people.filter((p) => p[k] === "Finished").length, prog: people.filter((p) => p[k] === "In progress").length,
+      none: people.filter((p) => p[k] === "Not started").length });
+    const c1 = tally("s1"), c2 = tally("s2"), nocon = people.filter((p) => !p.consent && p.active).length;
+    const badge = (st) => `<span class="badge ${st === "Finished" ? "ok" : st === "In progress" ? "warn" : ""}">${st}</span>`;
+    let html = `<div class="grid2"><div class="card"><h2>Task 1: compare translations (${t1.length} items)</h2>
+      <p><b>${c1.fin}</b> finished · <b>${c1.prog}</b> in progress · <b>${c1.none}</b> not started</p></div>
+      <div class="card"><h2>Task 2: proverb meanings (${t2n} items)</h2>
+      <p><b>${c2.fin}</b> finished · <b>${c2.prog}</b> in progress · <b>${c2.none}</b> not started</p></div></div>
+      ${nocon ? `<p class="status warn">${nocon} active evaluator(s) have not yet signed in and accepted the consent.</p>` : ""}
+      <div class="card" style="overflow-x:auto"><table class="data"><thead><tr><th>Rater</th><th>Consent</th><th>Task 1</th><th></th>
+      <th>Task 2</th><th></th><th>Last activity</th><th>Active time*</th><th>Pace*</th><th></th></tr></thead><tbody>
+      ${people.map((p) => `<tr><td><b>${esc(p.rater_code)}</b><br><span class="small muted">${esc(p.email)}${p.is_admin ? " · admin" : ""}${p.active ? "" : " · inactive"}</span></td>
+        <td>${p.consent ? "✓ " + new Date(p.consent).toLocaleDateString() : "<span class='muted'>not yet</span>"}</td>
+        <td>${p.done1}/${t1.length}${p.started1 > p.done1 ? `<br><span class="small muted">${p.started1 - p.done1} incomplete</span>` : ""}<br>${bar(p.done1, t1.length)}</td><td>${badge(p.s1)}</td>
+        <td>${t2n ? `${p.done2}/${t2n}<br>${bar(p.done2, t2n)}` : "—"}</td><td>${t2n ? badge(p.s2) : ""}</td>
+        <td>${ago(p.last)}</td><td>${fmtMin(p.act)}</td><td>${p.pace ? p.pace + " items/h" : "—"}</td>
+        <td><a href="#/monitor/${encodeURIComponent(p.rater_code)}">Details</a></td></tr>`).join("") ||
+        `<tr><td colspan="10">No evaluators yet. Add them in Admin → Evaluators.</td></tr>`}</tbody></table>
+      <p class="small muted">* Estimated from the times of saved answers (gaps over 15 minutes count as breaks); a rough
+      lower bound. "Incomplete" items have some but not all fields filled in. Exports are on the Admin page.</p></div>`;
+    const sel = people.find((p) => p.rater_code === code);
+    if (sel) {
+      const pref = count(sel.a, "preference"), judg = count(sel.m, "judgement");
+      const open1 = t1.map((it, i) => [it, i]).filter(([it]) => !sel.a.some((r) => r.item_id === it.item_id && isComplete(r))).map(([, i]) => i + 1);
+      const doneIds2 = new Set(sel.m.filter((r) => r.judgement).map((r) => r.item_id));
+      const open2 = state.mItems.map((it, i) => [it, i]).filter(([it]) => !doneIds2.has(it.item_id)).map(([, i]) => i + 1);
+      const list = (xs) => xs.length ? (xs.length > 60 ? xs.slice(0, 60).join(", ") + ` … (+${xs.length - 60} more)` : xs.join(", ")) : "none";
+      const dist = (o) => Object.keys(o).length ? Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${esc(k)}: <b>${v}</b>`).join(" · ") : "no answers yet";
+      const comments = [...sel.a, ...sel.m].filter((r) => r.comment && r.comment.trim());
+      html += `<div class="card" id="detail"><h2>Details: ${esc(sel.rater_code)}</h2>
+        <p><b>Task 1 preferences:</b> ${dist(pref)}</p><p><b>Task 1 items not yet complete:</b> ${list(open1)}</p>
+        ${t2n ? `<p><b>Task 2 judgements:</b> ${dist(judg)}</p><p><b>Task 2 items not yet judged:</b> ${list(open2)}</p>` : ""}
+        <p><b>Display problems reported:</b> ${sel.a.filter((r) => r.display_problem).length} · <b>Comments:</b> ${comments.length}</p>
+        ${comments.length ? `<table class="data"><thead><tr><th>Item</th><th>Comment</th></tr></thead><tbody>${comments.map((r) =>
+          `<tr><td>${esc(r.item_id)}</td><td>${esc(r.comment)}</td></tr>`).join("")}</tbody></table>` : ""}
+        <p class="small muted">Answer distributions are shown to admins only; they are for monitoring, not analysis.</p></div>`;
+    }
+    $("#mon").innerHTML = html;
+    $("#mon-time").textContent = "Updated " + new Date().toLocaleTimeString();
+    if (sel) $("#detail")?.scrollIntoView({ block: "nearest" });
+  } catch (e) { $("#mon").innerHTML = `<p class="status err">Could not load progress: ${esc(e.message || e)}</p>`; }
+  monitorTimer = setInterval(() => { if (location.hash.startsWith("#/monitor")) renderMonitor(code); else clearInterval(monitorTimer); }, 60000);
 }
 
 // ---------------------------------------------------------------- admin: manage evaluators

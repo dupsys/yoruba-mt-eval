@@ -122,6 +122,10 @@ class SupabaseStore {
     }
     return all;
   }
+  async allConsents() {   // admins can read every consent (policy consents_read)
+    const { data, error } = await this.db.from("consents").select("rater_code,consented_at");
+    if (error) throw error; return data;
+  }
   async allRaters() {
     const { data, error } = await this.db.from("raters").select("email,rater_code,is_admin,active,created_at").order("rater_code");
     if (error) throw error; return data;
@@ -214,6 +218,7 @@ class MockStore {
   }
   async allMeaningRatings() { return Object.values(this.st().meaning || {}); }
   async allRatings() { return Object.values(this.st().ratings || {}); }
+  async allConsents() { const s = this.st(); return s.consent ? [{ rater_code: "DEMO", consented_at: s.consent }] : []; }
   async allRaters() {
     const s = this.st();
     return [{ email: s.email || "demo@example.org", rater_code: "DEMO", is_admin: true, active: true }, ...(s.raters || [])];
