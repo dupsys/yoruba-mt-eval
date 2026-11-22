@@ -7,8 +7,13 @@
   <title>Yorùbá–English MT Evaluation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&family=Noto+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <!-- fonts load without blocking the page; the system font is used until they arrive -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&family=Noto+Sans:wght@400;600&display=swap"
+        onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&family=Noto+Sans:wght@400;600&display=swap"></noscript>
   <link rel="stylesheet" href="assets/styles.css">
+  <link rel="modulepreload" href="assets/app.js"><link rel="modulepreload" href="assets/store.js">
+  <link rel="modulepreload" href="assets/config.js"><link rel="modulepreload" href="assets/scales.js">
 </head>
 <body>
   <div class="layout">
@@ -20,6 +25,8 @@
     <main id="main" tabindex="-1"><p>Loading…</p></main>
   </div>
   <noscript>This site needs JavaScript.</noscript>
+  <!-- supabase-js 2.45.4 (MIT, see assets/vendor/supabase-js-LICENSE.txt), served from this site as one file -->
+  <script defer src="assets/vendor/supabase-js-2.45.4.umd.js"></script>
   <script type="module" src="assets/app.js"></script>
 </body>
 </html>

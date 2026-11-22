@@ -22,22 +22,30 @@ async function boot() {
   setInterval(retryPending, 15000);
 }
 
-async function refreshUser() {
+let refreshing = null;   // one user/data load at a time: start-up and the auth listener share it
+function refreshUser() {
+  if (!refreshing) refreshing = doRefreshUser().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+async function doRefreshUser() {
   try {
     state.me = await state.store.me();
     if (state.me?.rater_code) {
-      state.consent = await state.store.hasConsent(state.me.rater_code);
-      if (state.consent && !state.items.length) await loadData();
+      // consent check and data load run in parallel (raters may read items before consenting)
+      const [consent] = await Promise.all([state.store.hasConsent(state.me.rater_code),
+        state.items.length ? null : loadData()]);
+      state.consent = consent;
     }
   } catch (e) { showError(e); }
   renderSide();
 }
 
 async function loadData() {
-  state.items = await state.store.items();
-  state.ratings = await state.store.myRatings(state.me.rater_code);
-  state.mItems = await state.store.meaningItems();
-  state.mRatings = await state.store.myMeaningRatings(state.me.rater_code);
+  const code = state.me.rater_code;
+  [state.items, state.ratings, state.mItems, state.mRatings] = await Promise.all([
+    state.store.items(), state.store.myRatings(code), state.store.meaningItemIds(), state.store.myMeaningRatings(code)]);
+  state.mFull = false;
   const pkgs = [...new Set(state.items.map((i) => i.package))];
   if (!state.pkg || !pkgs.includes(state.pkg)) state.pkg = pkgs[0] || null;
   await retryPending();
@@ -274,7 +282,18 @@ function mCounts() {
 }
 function mFirstOpen() { const i = state.mItems.findIndex((x) => !state.mRatings[x.item_id]?.judgement); return i < 0 ? 0 : i; }
 
-function renderMeaning(arg) {
+async function ensureMeaningTexts() {
+  if (state.mFull || !state.mItems.length) return;
+  state.mItems = await state.store.meaningItems();
+  state.mFull = true;
+}
+
+async function renderMeaning(arg) {
+  if (!state.mFull && state.mItems.length) {
+    main().innerHTML = `<h1>Proverb meanings</h1><p class="lede">Loading the proverbs…</p>`;
+    try { await ensureMeaningTexts(); } catch (e) { return showError(e); }
+    if (!location.hash.startsWith("#/meaning")) return;      // the rater navigated away meanwhile
+  }
   const items = state.mItems;
   if (!items.length) { main().innerHTML = `<h1>No proverb items</h1><p class="lede">No proverb items have been loaded yet.</p>`; return; }
   const idx = Math.min(Math.max((parseInt(arg, 10) || mFirstOpen() + 1) - 1, 0), items.length - 1);
@@ -373,7 +392,7 @@ async function renderAdmin() {
     $("#adm").querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () =>
       downloadTsv(b.dataset.r, b.dataset.p, byRater[b.dataset.r] || [])));
     if (state.mItems.length) {
-      const mr = await state.store.allMeaningRatings();
+      const [mr] = await Promise.all([state.store.allMeaningRatings(), ensureMeaningTexts()]);
       const mBy = {}; for (const r of mr) (mBy[r.rater_code] ||= []).push(r);
       const mRows = raters.filter((x) => !x.is_admin || mBy[x.rater_code]).map((x) => {
         const rs = mBy[x.rater_code] || [];

@@ -17,13 +17,17 @@ function clean(fields) {
 // ---------------------------------------------------------------- Supabase
 class SupabaseStore {
   async init() {
-    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
+    // self-hosted UMD bundle (index.html); the CDN is only a fallback if that file failed to load
+    const lib = window.supabase?.createClient ? window.supabase
+      : await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
+    const { createClient } = lib;
     this.db = createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
     this.pendingKey = "yoeval-pending";
   }
   async session() { const { data } = await this.db.auth.getSession(); return data.session; }
-  onAuth(cb) { this.db.auth.onAuthStateChange((_e, s) => cb(s)); }
+  // react only to real sign-in/sign-out, not to the initial-session or hourly token-refresh events
+  onAuth(cb) { this.db.auth.onAuthStateChange((e, s) => { if (e === "SIGNED_IN" || e === "SIGNED_OUT") cb(s); }); }
   async signIn(email) {
     const { error } = await this.db.auth.signInWithOtp({ email: email.trim().toLowerCase(),
       options: { emailRedirectTo: location.origin + location.pathname } });
@@ -92,6 +96,11 @@ class SupabaseStore {
       all.push(...data); if (data.length < 1000) break; from += 1000;
     }
     return all;
+  }
+  async meaningItemIds() {   // ids only (for counts and progress); the full texts load when the task is opened
+    const { data, error } = await this.db.from("meaning_items").select("item_id,position").order("position").range(0, 9999);
+    if (error) { if (String(error.message).includes("meaning_items")) return []; throw error; }
+    return data;
   }
   async myMeaningRatings(code) {
     const { data, error } = await this.db.from("meaning_ratings").select("*").eq("rater_code", code);
@@ -195,6 +204,7 @@ class MockStore {
   pending() { return {}; }
   async flushPending() { return 0; }
   async meaningItems() { return DEMO_MEANING; }
+  async meaningItemIds() { return DEMO_MEANING.map(({ item_id, position }) => ({ item_id, position })); }
   async myMeaningRatings() { return this.st().meaning || {}; }
   async saveMeaning(code, itemId, fields) {
     const s = this.st(); s.meaning = s.meaning || {};
